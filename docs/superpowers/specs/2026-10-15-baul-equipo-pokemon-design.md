@@ -177,7 +177,7 @@ Trainer (aggregate root)          ← dueño de las invariantes de almacenamient
 | `Gender` | enum `MALE / FEMALE / GENDERLESS` |
 | `Nature` | 1 de 25 (nombre/ref) |
 | `Moveset` | lista **≤ 4**, sin duplicados |
-| `HeldItem` | `Optional`, **máx 1** |
+| `HeldItem` | El objeto que el ejemplar **sostiene/lleva encima** (ej. *Leftovers*, una *Berry*). Estado mutable, **máx 1** → `Optional<HeldItem>`. Guarda solo la referencia al `Item` de PokéAPI (lo estático vive allá). Distinto de la pokéball, que es dato histórico inmutable en `OriginMetadata`. |
 | `OriginMetadata` | OT id, pokéball, fecha de captura, nivel inicial, ubicación de origen (inmutable) |
 | `SpeciesRef` | referencia a la especie (id/name); los atributos estáticos **no** se copian |
 

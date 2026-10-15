@@ -18,11 +18,11 @@ public final class IndividualValues {
         for (Stat stat : Stat.values()) {
             Integer value = values == null ? null : values.get(stat);
             if (value == null) {
-                throw new InvalidStatValueException("Falta el IV de " + stat);
+                throw new InvalidStatValueException("Missing IV for " + stat);
             }
             if (value < MIN || value > MAX) {
                 throw new InvalidStatValueException(
-                        "IV de " + stat + " fuera de rango [" + MIN + "," + MAX + "]: " + value);
+                        "IV for " + stat + " out of range [" + MIN + "," + MAX + "]: " + value);
             }
             copy.put(stat, value);
         }

@@ -1,0 +1,114 @@
+package skaro.pokeapi.trainer.application;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import skaro.pokeapi.trainer.application.port.PokemonCatalogPort;
+import skaro.pokeapi.trainer.application.port.PokemonRepository;
+import skaro.pokeapi.trainer.application.port.SpeciesData;
+import skaro.pokeapi.trainer.domain.EffortValues;
+import skaro.pokeapi.trainer.domain.Gender;
+import skaro.pokeapi.trainer.domain.HeldItem;
+import skaro.pokeapi.trainer.domain.IndividualValues;
+import skaro.pokeapi.trainer.domain.Moveset;
+import skaro.pokeapi.trainer.domain.Nature;
+import skaro.pokeapi.trainer.domain.OriginMetadata;
+import skaro.pokeapi.trainer.domain.PokemonInstance;
+import skaro.pokeapi.trainer.domain.SpeciesRef;
+import skaro.pokeapi.trainer.domain.StorageLocation;
+import skaro.pokeapi.trainer.domain.Trainer;
+import skaro.pokeapi.trainer.domain.exception.InvalidAbilityException;
+import skaro.pokeapi.trainer.domain.exception.SpeciesNotFoundException;
+
+@Service
+public class TrainerService {
+
+    private final PokemonRepository repository;
+    private final PokemonCatalogPort catalog;
+
+    public TrainerService(PokemonRepository repository, PokemonCatalogPort catalog) {
+        this.repository = repository;
+        this.catalog = catalog;
+    }
+
+    public Mono<CaptureResult> capture(String trainerId, CaptureCommand cmd) {
+        return catalog.getSpecies(cmd.getSpecies())
+                .switchIfEmpty(Mono.error(new SpeciesNotFoundException(cmd.getSpecies())))
+                .flatMap(species -> {
+                    validateAbility(cmd.getAbility(), species);
+                    PokemonInstance instance = toInstance(cmd);
+                    return repository.loadOrCreate(trainerId)
+                            .flatMap(trainer -> {
+                                StorageLocation location = trainer.capture(instance);
+                                return repository.save(trainer)
+                                        .thenReturn(new CaptureResult(instance.getId(), location));
+                            });
+                });
+    }
+
+    public Mono<PokemonInstance> getInstance(String trainerId, UUID id) {
+        return requireTrainer(trainerId).map(trainer -> trainer.findById(id));
+    }
+
+    public Flux<PartyMember> listParty(String trainerId) {
+        return requireTrainer(trainerId)
+                .flatMapMany(trainer -> Flux.fromIterable(trainer.party()))
+                .flatMap(instance -> catalog.getSpecies(instance.getSpecies().getName())
+                        .map(species -> new PartyMember(instance, species)));
+    }
+
+    public Flux<PokemonInstance> listBox(String trainerId) {
+        return requireTrainer(trainerId)
+                .flatMapMany(trainer -> Flux.fromIterable(trainer.box()));
+    }
+
+    public Mono<StorageLocation> move(String trainerId, UUID id, StorageLocation target) {
+        return requireTrainer(trainerId).flatMap(trainer -> {
+            if (target == StorageLocation.PARTY) {
+                trainer.moveToParty(id);
+            } else {
+                trainer.moveToBox(id);
+            }
+            return repository.save(trainer).thenReturn(trainer.locationOf(id));
+        });
+    }
+
+    private Mono<Trainer> requireTrainer(String trainerId) {
+        return repository.findByTrainerId(trainerId)
+                .switchIfEmpty(Mono.error(new SpeciesNotFoundException("trainer:" + trainerId)));
+    }
+
+    private void validateAbility(String ability, SpeciesData species) {
+        String normalized = ability == null ? "" : ability.trim().toLowerCase();
+        boolean belongs = species.getAbilities().stream()
+                .anyMatch(a -> a.equalsIgnoreCase(normalized));
+        if (!belongs) {
+            throw new InvalidAbilityException(ability, species.getName());
+        }
+    }
+
+    private PokemonInstance toInstance(CaptureCommand cmd) {
+        HeldItem heldItem = (cmd.getHeldItem() == null || cmd.getHeldItem().trim().isEmpty())
+                ? null : new HeldItem(cmd.getHeldItem());
+        return PokemonInstance.builder()
+                .id(UUID.randomUUID())
+                .species(new SpeciesRef(cmd.getSpecies()))
+                .nickname(cmd.getNickname())
+                .ivs(new IndividualValues(cmd.getIvs()))
+                .evs(new EffortValues(cmd.getEvs()))
+                .nature(new Nature(cmd.getNature()))
+                .ability(cmd.getAbility().trim().toLowerCase())
+                .shiny(cmd.isShiny())
+                .gender(cmd.getGender() == null ? Gender.GENDERLESS : cmd.getGender())
+                .moveset(new Moveset(cmd.getMoves()))
+                .heldItem(heldItem)
+                .origin(new OriginMetadata(cmd.getOriginalTrainerId(), cmd.getPokeball(),
+                        LocalDate.now(), cmd.getInitialLevel(), cmd.getOriginLocation()))
+                .build();
+    }
+}

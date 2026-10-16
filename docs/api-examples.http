@@ -1,0 +1,29 @@
+### Capture a Bulbasaur
+POST http://localhost:8080/api/v1/trainers/ash/pokemon
+Content-Type: application/json
+
+{
+  "species": "bulbasaur", "nature": "hardy", "ability": "overgrow",
+  "gender": "MALE", "initialLevel": 5, "originalTrainerId": "ash", "pokeball": "poke-ball",
+  "moves": ["tackle", "growl"],
+  "ivs": {"HP":31,"ATTACK":31,"DEFENSE":31,"SPECIAL_ATTACK":31,"SPECIAL_DEFENSE":31,"SPEED":31},
+  "evs": {"HP":0,"ATTACK":0,"DEFENSE":0,"SPECIAL_ATTACK":0,"SPECIAL_DEFENSE":0,"SPEED":0}
+}
+
+### List active party (composite view)
+GET http://localhost:8080/api/v1/trainers/ash/party
+
+### List box
+GET http://localhost:8080/api/v1/trainers/ash/box
+
+### Move to box
+PATCH http://localhost:8080/api/v1/trainers/ash/pokemon/REPLACE-UUID
+Content-Type: application/json
+
+{ "location": "BOX" }
+
+### Evolve
+POST http://localhost:8080/api/v1/trainers/ash/pokemon/REPLACE-UUID/evolve
+Content-Type: application/json
+
+{ "targetSpecies": "ivysaur" }

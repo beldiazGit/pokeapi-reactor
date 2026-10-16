@@ -25,6 +25,7 @@ import skaro.pokeapi.trainer.domain.Trainer;
 import skaro.pokeapi.trainer.domain.exception.InvalidAbilityException;
 import skaro.pokeapi.trainer.domain.exception.InvalidEvolutionException;
 import skaro.pokeapi.trainer.domain.exception.SpeciesNotFoundException;
+import skaro.pokeapi.trainer.domain.exception.TrainerNotFoundException;
 
 @Service
 public class TrainerService {
@@ -99,7 +100,7 @@ public class TrainerService {
 
     private Mono<Trainer> requireTrainer(String trainerId) {
         return repository.findByTrainerId(trainerId)
-                .switchIfEmpty(Mono.error(new SpeciesNotFoundException("trainer:" + trainerId)));
+                .switchIfEmpty(Mono.error(new TrainerNotFoundException(trainerId)));
     }
 
     private void validateAbility(String ability, SpeciesData species) {

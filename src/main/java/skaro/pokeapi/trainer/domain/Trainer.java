@@ -2,7 +2,9 @@ package skaro.pokeapi.trainer.domain;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -15,8 +17,10 @@ public class Trainer {
 
     private final String trainerId;
     private final StorageLimits limits;
-    private final List<PokemonInstance> party = new ArrayList<>();
-    private final List<PokemonInstance> box = new ArrayList<>();
+    // LinkedHashMap keyed by instance id: O(1) lookup by id while preserving
+    // slot order. Re-inserting an existing key (evolve) keeps its position.
+    private final Map<UUID, PokemonInstance> party = new LinkedHashMap<>();
+    private final Map<UUID, PokemonInstance> box = new LinkedHashMap<>();
 
     public Trainer(String trainerId, StorageLimits limits) {
         if (trainerId == null || trainerId.trim().isEmpty()) {
@@ -29,76 +33,71 @@ public class Trainer {
     public StorageLocation capture(PokemonInstance instance) {
         Objects.requireNonNull(instance, "instance");
         if (party.size() < limits.getPartyMax()) {
-            party.add(instance);
+            party.put(instance.getId(), instance);
             return StorageLocation.PARTY;
         }
         if (box.size() < limits.getBoxMax()) {
-            box.add(instance);
+            box.put(instance.getId(), instance);
             return StorageLocation.BOX;
         }
         throw new StorageFullException();
     }
 
     public void moveToParty(UUID id) {
-        int idx = indexIn(box, id);
-        if (idx < 0) {
-            if (indexIn(party, id) >= 0) return; // already in the party (idempotent)
+        if (party.containsKey(id)) return; // already in the party (idempotent)
+        PokemonInstance instance = box.get(id);
+        if (instance == null) {
             throw new InstanceNotFoundException(id);
         }
         if (party.size() >= limits.getPartyMax()) {
             throw new PartyFullException(limits.getPartyMax());
         }
-        party.add(box.remove(idx));
+        box.remove(id);
+        party.put(id, instance);
     }
 
     public void moveToBox(UUID id) {
-        int idx = indexIn(party, id);
-        if (idx < 0) {
-            if (indexIn(box, id) >= 0) return; // already in the box (idempotent)
+        if (box.containsKey(id)) return; // already in the box (idempotent)
+        PokemonInstance instance = party.get(id);
+        if (instance == null) {
             throw new InstanceNotFoundException(id);
         }
         if (box.size() >= limits.getBoxMax()) {
             throw new BoxFullException(limits.getBoxMax());
         }
-        box.add(party.remove(idx));
+        party.remove(id);
+        box.put(id, instance);
     }
 
     public void evolve(UUID id, SpeciesRef newSpecies, String newAbility) {
-        int partyIdx = indexIn(party, id);
-        if (partyIdx >= 0) {
-            party.set(partyIdx, party.get(partyIdx).evolve(newSpecies, newAbility));
+        PokemonInstance partied = party.get(id);
+        if (partied != null) {
+            party.put(id, partied.evolve(newSpecies, newAbility));
             return;
         }
-        int boxIdx = indexIn(box, id);
-        if (boxIdx >= 0) {
-            box.set(boxIdx, box.get(boxIdx).evolve(newSpecies, newAbility));
+        PokemonInstance boxed = box.get(id);
+        if (boxed != null) {
+            box.put(id, boxed.evolve(newSpecies, newAbility));
             return;
         }
         throw new InstanceNotFoundException(id);
     }
 
     public PokemonInstance findById(UUID id) {
-        int p = indexIn(party, id);
-        if (p >= 0) return party.get(p);
-        int b = indexIn(box, id);
-        if (b >= 0) return box.get(b);
+        PokemonInstance instance = party.get(id);
+        if (instance != null) return instance;
+        instance = box.get(id);
+        if (instance != null) return instance;
         throw new InstanceNotFoundException(id);
     }
 
     public StorageLocation locationOf(UUID id) {
-        if (indexIn(party, id) >= 0) return StorageLocation.PARTY;
-        if (indexIn(box, id) >= 0) return StorageLocation.BOX;
+        if (party.containsKey(id)) return StorageLocation.PARTY;
+        if (box.containsKey(id)) return StorageLocation.BOX;
         throw new InstanceNotFoundException(id);
     }
 
-    public List<PokemonInstance> party() { return Collections.unmodifiableList(new ArrayList<>(party)); }
-    public List<PokemonInstance> box() { return Collections.unmodifiableList(new ArrayList<>(box)); }
+    public List<PokemonInstance> party() { return Collections.unmodifiableList(new ArrayList<>(party.values())); }
+    public List<PokemonInstance> box() { return Collections.unmodifiableList(new ArrayList<>(box.values())); }
     public String getTrainerId() { return trainerId; }
-
-    private int indexIn(List<PokemonInstance> list, UUID id) {
-        for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).getId().equals(id)) return i;
-        }
-        return -1;
-    }
 }

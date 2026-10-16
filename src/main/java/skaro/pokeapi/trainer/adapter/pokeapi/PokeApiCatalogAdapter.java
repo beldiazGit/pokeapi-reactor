@@ -56,6 +56,13 @@ public class PokeApiCatalogAdapter implements PokemonCatalogPort {
     // (it has no name), so it cannot be fetched via PokeApiClient.getResource/followResource,
     // both of which require a PokeApiResource type bound. Fetch it directly by URL instead,
     // mirroring what WebClientEntityFactory.getNamedResource does internally for named resources.
+    //
+    // KNOWN LIMITATION: CacheFacade only wraps named-resource lookups made through
+    // PokeApiClient.getResource; it has no entry point for this unnamed, URL-only fetch.
+    // As a result, following the evolution chain by URL bypasses the cache entirely —
+    // every call to evolve()/directEvolutionsOf() re-fetches and re-decodes the chain from
+    // the network, even for a species whose chain was just fetched. Accepted for now; would
+    // need a URL-keyed cache (or promoting EvolutionChain to a cacheable PokeApiResource) to fix.
     private Mono<EvolutionChain> fetchEvolutionChain(PokemonSpecies species) {
         return webClient.get()
                 .uri(URI.create(species.getEvolutionChain().getUrl()))

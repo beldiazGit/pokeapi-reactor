@@ -23,6 +23,7 @@ import skaro.pokeapi.trainer.domain.SpeciesRef;
 import skaro.pokeapi.trainer.domain.StorageLocation;
 import skaro.pokeapi.trainer.domain.Trainer;
 import skaro.pokeapi.trainer.domain.exception.InvalidAbilityException;
+import skaro.pokeapi.trainer.domain.exception.InvalidEvolutionException;
 import skaro.pokeapi.trainer.domain.exception.SpeciesNotFoundException;
 
 @Service
@@ -75,6 +76,24 @@ public class TrainerService {
                 trainer.moveToBox(id);
             }
             return repository.save(trainer).thenReturn(trainer.locationOf(id));
+        });
+    }
+
+    public Mono<PokemonInstance> evolve(String trainerId, UUID id, String targetSpecies) {
+        String target = targetSpecies == null ? "" : targetSpecies.trim().toLowerCase();
+        return requireTrainer(trainerId).flatMap(trainer -> {
+            PokemonInstance current = trainer.findById(id);
+            String from = current.getSpecies().getName();
+            return catalog.directEvolutionsOf(from)
+                    .filter(option -> option.getToSpecies().equalsIgnoreCase(target))
+                    .next()
+                    .switchIfEmpty(Mono.error(new InvalidEvolutionException(from, target)))
+                    .flatMap(option -> {
+                        String newAbility = option.getAllowedAbilities().isEmpty()
+                                ? current.getAbility() : option.getAllowedAbilities().get(0);
+                        trainer.evolve(id, new SpeciesRef(target), newAbility);
+                        return repository.save(trainer).thenReturn(trainer.findById(id));
+                    });
         });
     }
 

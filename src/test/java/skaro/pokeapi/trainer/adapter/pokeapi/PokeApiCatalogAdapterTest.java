@@ -31,6 +31,7 @@ class PokeApiCatalogAdapterTest {
 
     private MockWebServer server;
     private PokeApiClient client;
+    private WebClient webClient;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -48,7 +49,7 @@ class PokeApiCatalogAdapterTest {
                 .codecs(configurer -> configurer.defaultCodecs().jackson2JsonDecoder(decoder))
                 .build();
 
-        WebClient webClient = WebClient.builder()
+        webClient = WebClient.builder()
                 .baseUrl(String.format("http://localhost:%s", server.getPort()))
                 .exchangeStrategies(strategies)
                 .build();
@@ -74,7 +75,7 @@ class PokeApiCatalogAdapterTest {
         server.enqueue(new MockResponse().setBody(body)
                 .addHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE));
 
-        PokeApiCatalogAdapter adapter = new PokeApiCatalogAdapter(client);
+        PokeApiCatalogAdapter adapter = new PokeApiCatalogAdapter(client, webClient);
 
         StepVerifier.create(adapter.getSpecies("bulbasaur"))
                 .assertNext(data -> {

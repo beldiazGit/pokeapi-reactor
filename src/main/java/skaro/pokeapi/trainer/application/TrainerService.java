@@ -1,7 +1,6 @@
 package skaro.pokeapi.trainer.application;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -39,11 +38,13 @@ public class TrainerService {
     }
 
     public Mono<CaptureResult> capture(String trainerId, CaptureCommand cmd) {
-        return catalog.getSpecies(cmd.getSpecies())
-                .switchIfEmpty(Mono.error(new SpeciesNotFoundException(cmd.getSpecies())))
-                .flatMap(species -> {
-                    validateAbility(cmd.getAbility(), species);
-                    PokemonInstance instance = toInstance(cmd);
+        String species = cmd.getSpecies() == null ? "" : cmd.getSpecies().trim().toLowerCase();
+        String ability = cmd.getAbility() == null ? "" : cmd.getAbility().trim().toLowerCase();
+        return catalog.getSpecies(species)
+                .switchIfEmpty(Mono.error(new SpeciesNotFoundException(species)))
+                .flatMap(speciesData -> {
+                    validateAbility(ability, speciesData);
+                    PokemonInstance instance = toInstance(cmd, ability);
                     return repository.loadOrCreate(trainerId)
                             .flatMap(trainer -> {
                                 StorageLocation location = trainer.capture(instance);
@@ -61,6 +62,7 @@ public class TrainerService {
         return requireTrainer(trainerId)
                 .flatMapMany(trainer -> Flux.fromIterable(trainer.party()))
                 .flatMap(instance -> catalog.getSpecies(instance.getSpecies().getName())
+                        .switchIfEmpty(Mono.error(new SpeciesNotFoundException(instance.getSpecies().getName())))
                         .map(species -> new PartyMember(instance, species)));
     }
 
@@ -70,6 +72,9 @@ public class TrainerService {
     }
 
     public Mono<StorageLocation> move(String trainerId, UUID id, StorageLocation target) {
+        if (target == null) {
+            return Mono.error(new IllegalArgumentException("location is required"));
+        }
         return requireTrainer(trainerId).flatMap(trainer -> {
             if (target == StorageLocation.PARTY) {
                 trainer.moveToParty(id);
@@ -103,16 +108,15 @@ public class TrainerService {
                 .switchIfEmpty(Mono.error(new TrainerNotFoundException(trainerId)));
     }
 
-    private void validateAbility(String ability, SpeciesData species) {
-        String normalized = ability == null ? "" : ability.trim().toLowerCase();
+    private void validateAbility(String normalizedAbility, SpeciesData species) {
         boolean belongs = species.getAbilities().stream()
-                .anyMatch(a -> a.equalsIgnoreCase(normalized));
+                .anyMatch(a -> a.equalsIgnoreCase(normalizedAbility));
         if (!belongs) {
-            throw new InvalidAbilityException(ability, species.getName());
+            throw new InvalidAbilityException(normalizedAbility, species.getName());
         }
     }
 
-    private PokemonInstance toInstance(CaptureCommand cmd) {
+    private PokemonInstance toInstance(CaptureCommand cmd, String normalizedAbility) {
         HeldItem heldItem = (cmd.getHeldItem() == null || cmd.getHeldItem().trim().isEmpty())
                 ? null : new HeldItem(cmd.getHeldItem());
         return PokemonInstance.builder()
@@ -122,7 +126,7 @@ public class TrainerService {
                 .ivs(new IndividualValues(cmd.getIvs()))
                 .evs(new EffortValues(cmd.getEvs()))
                 .nature(new Nature(cmd.getNature()))
-                .ability(cmd.getAbility().trim().toLowerCase())
+                .ability(normalizedAbility)
                 .shiny(cmd.isShiny())
                 .gender(cmd.getGender() == null ? Gender.GENDERLESS : cmd.getGender())
                 .moveset(new Moveset(cmd.getMoves()))

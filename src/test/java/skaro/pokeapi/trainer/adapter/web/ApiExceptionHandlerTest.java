@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
 import skaro.pokeapi.trainer.application.TrainerService;
@@ -32,7 +33,12 @@ class ApiExceptionHandlerTest {
                 .header("Content-Type", "application/json")
                 .bodyValue("{\"species\":\"x\",\"ivs\":{},\"evs\":{}}")
                 .exchange()
-                .expectStatus().isEqualTo(409);
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(409)
+                .jsonPath("$.title").exists()
+                .jsonPath("$.detail").exists();
     }
 
     @Test

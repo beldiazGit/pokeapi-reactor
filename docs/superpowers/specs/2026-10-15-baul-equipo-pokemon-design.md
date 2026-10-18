@@ -139,6 +139,16 @@ piden una frontera de consistencia. Candidato natural: **`Trainer` como raíz**.
   De modo que la invariante del party/baúl se sostiene bajo concurrencia: no hay lost
   updates ni se excede el máximo. Un adapter de BD real (R2DBC/Mongo) usaría exactamente
   el mismo patrón de optimistic locking con una columna/campo `version`.
+
+  **Techo de reintentos (trade-off de liveness).** `MAX_RETRIES` (8) es un techo
+  afinado para la concurrencia de escritura *esperada* por entrenador (en la práctica,
+  muy pocos escritores simultáneos sobre un mismo trainer). No está dimensionado para
+  contención patológica: si más de 8 escritores compiten por el mismo trainer, el
+  perdedor agota reintentos y el conflicto se expone como **HTTP 409**
+  (`OptimisticLockException`). Ese 409 es la respuesta correcta y segura —nunca corrompe
+  estado ni rompe la invariante; el cliente simplemente reintenta. Es una elección
+  consciente de *safety sobre liveness* bajo contención extrema, no un bug. Subir el
+  techo cambia un 409 más raro por más reintentos desperdiciados.
 - **`PokemonInstance` raíz (descartado):** agregados más chicos que escalan por
   separado, pero "party ≤ 6" pasa a cruzar agregados ⇒ necesita transacción u optimistic
   locking para evitar que dos capturas concurrentes metan 7 (invariante entre agregados).

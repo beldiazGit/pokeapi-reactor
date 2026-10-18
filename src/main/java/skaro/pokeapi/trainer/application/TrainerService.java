@@ -33,7 +33,14 @@ public class TrainerService {
 
     // Max optimistic-lock retries for a mutating use case before surfacing the
     // conflict. Under contention a retry reloads a fresh copy and re-applies the
-    // same change; 8 attempts is ample headroom for the expected concurrency.
+    // same change. This is a tuned ceiling for the EXPECTED per-trainer write
+    // concurrency (a single trainer realistically has very few concurrent
+    // writers). It is deliberately NOT sized for pathological fan-out: if more
+    // than MAX_RETRIES writers contend on the same trainer, the loser exhausts
+    // retries and the conflict surfaces as HTTP 409 (OptimisticLockException).
+    // That 409 is the correct, safe response — it never corrupts state or breaks
+    // the party/box invariant; the client simply retries. Raising this trades a
+    // rarer 409 for more wasted reattempts under extreme contention.
     private static final int MAX_RETRIES = 8;
 
     private final PokemonRepository repository;

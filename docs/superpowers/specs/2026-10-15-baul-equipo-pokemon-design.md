@@ -111,10 +111,34 @@ Las reglas que cruzan varios ejemplares (party ≤ N, baúl ≤ M, un ejemplar e
 exactamente un lugar, preservar slot al evolucionar) son **invariantes de colección** ⇒
 piden una frontera de consistencia. Candidato natural: **`Trainer` como raíz**.
 
-- **`Trainer` raíz (elegido):** invariantes en un solo lugar, sin carreras; un
+- **`Trainer` raíz (elegido):** invariantes en un solo lugar; un
   entrenador = un documento (calza con Mongo); tamaño acotado (~party 6 + baúl 30). Es
   la respuesta DDD de libro y la más defendible. Contra: el detalle por id entra por el
   trainer (trivial).
+
+  **Concurrencia (optimistic locking).** Que las invariantes vivan en un solo agregado
+  no basta por sí solo para evitar carreras cuando el store muta el objeto en su lugar:
+  dos capturas concurrentes para el mismo `trainerId` podían intercalar el chequeo de
+  tamaño y el `put` y meter 7 en un party de 6. El mecanismo que sostiene la invariante
+  bajo concurrencia es **optimistic locking**:
+  - **Copy-on-load:** cada lectura (`findByTrainerId` / `loadOrCreate`) devuelve una
+    **copia aislada** del agregado, nunca la referencia almacenada; así cada request
+    muta su propia copia y jamás corrompe el store.
+  - **Versión en el agregado:** `Trainer` lleva un campo `version` (0 para nuevos) que
+    el repositorio incrementa en cada save vía `nextVersion()`.
+  - **Save con compare-and-swap atómico:** `save` usa `ConcurrentHashMap.compute`, cuya
+    función de remapeo corre bajo el lock del bin de esa clave; compara la versión
+    almacenada contra la de la copia entrante y, si difieren (otro escritor ganó),
+    lanza `OptimisticLockException`; si coinciden, reemplaza por `nextVersion()`. El
+    chequeo-y-reemplazo es un único paso atómico por clave.
+  - **Reintento en los casos de uso:** `capture`, `move` y `evolve` envuelven el tramo
+    LOAD→MUTATE→SAVE en `Mono.defer(...).retryWhen(Retry.max(N).filter(...))`; ante
+    `OptimisticLockException` recargan una copia fresca y re-aplican el mismo cambio
+    (la captura reusa la MISMA instancia/UUID, construida fuera del bloque reintentado).
+
+  De modo que la invariante del party/baúl se sostiene bajo concurrencia: no hay lost
+  updates ni se excede el máximo. Un adapter de BD real (R2DBC/Mongo) usaría exactamente
+  el mismo patrón de optimistic locking con una columna/campo `version`.
 - **`PokemonInstance` raíz (descartado):** agregados más chicos que escalan por
   separado, pero "party ≤ 6" pasa a cruzar agregados ⇒ necesita transacción u optimistic
   locking para evitar que dos capturas concurrentes metan 7 (invariante entre agregados).

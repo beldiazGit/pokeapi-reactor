@@ -21,6 +21,11 @@ public class Trainer {
     // slot order. Re-inserting an existing key (evolve) keeps its position.
     private final Map<UUID, PokemonInstance> party = new LinkedHashMap<>();
     private final Map<UUID, PokemonInstance> box = new LinkedHashMap<>();
+    // Optimistic-locking version. New trainers start at 0; the repository bumps
+    // it on every successful save via nextVersion(). The domain itself stays
+    // lock-free and synchronous: version is just data the repository uses for
+    // compare-and-swap.
+    private final long version;
 
     public Trainer(String trainerId, StorageLimits limits) {
         if (trainerId == null || trainerId.trim().isEmpty()) {
@@ -28,6 +33,39 @@ public class Trainer {
         }
         this.trainerId = trainerId.trim();
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.version = 0L;
+    }
+
+    /**
+     * Deep copy constructor used for copy-on-load isolation. Produces an
+     * independent aggregate: same trainerId and limits, fresh LinkedHashMaps for
+     * party and box (holding the same immutable PokemonInstance references), and
+     * the same version. PokemonInstance and all value objects are immutable, so
+     * copying the maps fully isolates mutations of one copy from another.
+     */
+    public Trainer(Trainer other) {
+        Objects.requireNonNull(other, "other");
+        this.trainerId = other.trainerId;
+        this.limits = other.limits;
+        this.party.putAll(other.party);
+        this.box.putAll(other.box);
+        this.version = other.version;
+    }
+
+    private Trainer(Trainer other, long version) {
+        this.trainerId = other.trainerId;
+        this.limits = other.limits;
+        this.party.putAll(other.party);
+        this.box.putAll(other.box);
+        this.version = version;
+    }
+
+    /**
+     * Returns a NEW deep copy of this trainer whose version is this.version + 1.
+     * Used by the repository on save to advance the stored version.
+     */
+    public Trainer nextVersion() {
+        return new Trainer(this, this.version + 1L);
     }
 
     public StorageLocation capture(PokemonInstance instance) {
@@ -100,4 +138,5 @@ public class Trainer {
     public List<PokemonInstance> party() { return Collections.unmodifiableList(new ArrayList<>(party.values())); }
     public List<PokemonInstance> box() { return Collections.unmodifiableList(new ArrayList<>(box.values())); }
     public String getTrainerId() { return trainerId; }
+    public long getVersion() { return version; }
 }

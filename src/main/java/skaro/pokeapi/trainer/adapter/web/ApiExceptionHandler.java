@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import skaro.pokeapi.trainer.application.port.OptimisticLockException;
 import skaro.pokeapi.trainer.domain.exception.BoxFullException;
 import skaro.pokeapi.trainer.domain.exception.InstanceNotFoundException;
 import skaro.pokeapi.trainer.domain.exception.InvalidAbilityException;
@@ -29,7 +30,8 @@ public class ApiExceptionHandler {
         return problem(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
-    @ExceptionHandler({PartyFullException.class, BoxFullException.class, StorageFullException.class})
+    @ExceptionHandler({PartyFullException.class, BoxFullException.class, StorageFullException.class,
+            OptimisticLockException.class})
     public ResponseEntity<Map<String, Object>> conflict(RuntimeException ex) {
         return problem(HttpStatus.CONFLICT, ex.getMessage());
     }

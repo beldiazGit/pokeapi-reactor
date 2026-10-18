@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
+import skaro.pokeapi.trainer.application.port.OptimisticLockException;
 import skaro.pokeapi.trainer.application.port.PokemonCatalogPort;
 import skaro.pokeapi.trainer.application.port.PokemonRepository;
 import skaro.pokeapi.trainer.application.port.SpeciesData;
@@ -29,6 +31,11 @@ import skaro.pokeapi.trainer.domain.exception.TrainerNotFoundException;
 @Service
 public class TrainerService {
 
+    // Max optimistic-lock retries for a mutating use case before surfacing the
+    // conflict. Under contention a retry reloads a fresh copy and re-applies the
+    // same change; 8 attempts is ample headroom for the expected concurrency.
+    private static final int MAX_RETRIES = 8;
+
     private final PokemonRepository repository;
     private final PokemonCatalogPort catalog;
 
@@ -44,13 +51,16 @@ public class TrainerService {
                 .switchIfEmpty(Mono.error(new SpeciesNotFoundException(species)))
                 .flatMap(speciesData -> {
                     validateAbility(ability, speciesData);
+                    // Build the instance (with its UUID) ONCE, outside the retried
+                    // block: a retry must re-apply the SAME instance, not mint a new one.
                     PokemonInstance instance = toInstance(cmd, ability);
-                    return repository.loadOrCreate(trainerId)
+                    return Mono.defer(() -> repository.loadOrCreate(trainerId)
                             .flatMap(trainer -> {
                                 StorageLocation location = trainer.capture(instance);
                                 return repository.save(trainer)
                                         .thenReturn(new CaptureResult(instance.getId(), location));
-                            });
+                            }))
+                            .retryWhen(optimisticLockRetry());
                 });
     }
 
@@ -75,18 +85,21 @@ public class TrainerService {
         if (target == null) {
             return Mono.error(new IllegalArgumentException("location is required"));
         }
-        return requireTrainer(trainerId).flatMap(trainer -> {
+        return Mono.defer(() -> requireTrainer(trainerId).flatMap(trainer -> {
             if (target == StorageLocation.PARTY) {
                 trainer.moveToParty(id);
             } else {
                 trainer.moveToBox(id);
             }
             return repository.save(trainer).thenReturn(trainer.locationOf(id));
-        });
+        })).retryWhen(optimisticLockRetry());
     }
 
     public Mono<PokemonInstance> evolve(String trainerId, UUID id, String targetSpecies) {
         String target = targetSpecies == null ? "" : targetSpecies.trim().toLowerCase();
+        // Resolve the evolution option + new ability ONCE, outside the retried
+        // block (it is a pure read against the catalog and does not change under
+        // concurrency). Only the load -> mutate -> save portion is retried.
         return requireTrainer(trainerId).flatMap(trainer -> {
             PokemonInstance current = trainer.findById(id);
             String from = current.getSpecies().getName();
@@ -94,13 +107,24 @@ public class TrainerService {
                     .filter(option -> option.getToSpecies().equalsIgnoreCase(target))
                     .next()
                     .switchIfEmpty(Mono.error(new InvalidEvolutionException(from, target)))
-                    .flatMap(option -> {
-                        String newAbility = option.getAllowedAbilities().isEmpty()
-                                ? current.getAbility() : option.getAllowedAbilities().get(0);
-                        trainer.evolve(id, new SpeciesRef(target), newAbility);
-                        return repository.save(trainer).thenReturn(trainer.findById(id));
-                    });
-        });
+                    .map(option -> option.getAllowedAbilities().isEmpty()
+                            ? current.getAbility() : option.getAllowedAbilities().get(0));
+        }).flatMap(newAbility -> Mono.defer(() -> requireTrainer(trainerId).flatMap(trainer -> {
+            trainer.evolve(id, new SpeciesRef(target), newAbility);
+            return repository.save(trainer).thenReturn(trainer.findById(id));
+        })).retryWhen(optimisticLockRetry()));
+    }
+
+    /**
+     * Retry policy for the mutating use cases: retry up to MAX_RETRIES times only
+     * on OptimisticLockException, and when retries are exhausted rethrow the
+     * underlying OptimisticLockException (not Reactor's RetryExhaustedException
+     * wrapper) so it maps cleanly to 409 at the web layer.
+     */
+    private static Retry optimisticLockRetry() {
+        return Retry.max(MAX_RETRIES)
+                .filter(OptimisticLockException.class::isInstance)
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure());
     }
 
     private Mono<Trainer> requireTrainer(String trainerId) {

@@ -6,6 +6,58 @@
 # pokeapi-reactor
 A non-blocking, reactive API client for [PokeAPI](https://pokeapi.co/) with caching for Spring Boot projects.
 
+---
+
+## Domain: Pokémon Box and Active Party
+
+This fork extends the `pokeapi-reactor` library with a domain application that manages
+a trainer's individual Pokémon (Active Party vs. Box). See the design document at
+[`docs/superpowers/specs/2026-10-15-baul-equipo-pokemon-design.md`](docs/superpowers/specs/2026-10-15-baul-equipo-pokemon-design.md).
+
+### Architecture
+Hexagonal, in a single module under `skaro.pokeapi.trainer`: `domain` (pure) ·
+`application` (reactive use cases) · `adapter/{web,persistence,pokeapi}`. Persistence
+is in-memory behind a port (`PokemonRepository`); PokéAPI is consumed via
+`PokemonCatalogPort` on top of the existing `PokeApiClient`.
+
+### How to run
+```bash
+./mvnw spring-boot:run
+# Embedded Netty on http://localhost:8080
+```
+
+Configurable limits in `application.yml` (`trainer.party.max-size`,
+`trainer.box.max-size`).
+
+### Endpoints
+| Method + path | What it does |
+|---|---|
+| `POST /api/v1/trainers/{id}/pokemon` | Capture/create (auto party→box), `201` |
+| `GET /api/v1/trainers/{id}/pokemon/{uuid}` | Specimen detail |
+| `GET /api/v1/trainers/{id}/party` | Active party (composite view with PokéAPI) |
+| `GET /api/v1/trainers/{id}/box` | Box |
+| `PATCH /api/v1/trainers/{id}/pokemon/{uuid}` | Transfer `{"location":"PARTY"\|"BOX"}` |
+| `POST /api/v1/trainers/{id}/pokemon/{uuid}/evolve` | Evolution (bonus) |
+
+### Example
+```bash
+curl -X POST http://localhost:8080/api/v1/trainers/ash/pokemon \
+  -H 'Content-Type: application/json' \
+  -d '{"species":"bulbasaur","nature":"hardy","ability":"overgrow","gender":"MALE",
+       "initialLevel":5,"originalTrainerId":"ash","pokeball":"poke-ball",
+       "moves":["tackle","growl"],
+       "ivs":{"HP":31,"ATTACK":31,"DEFENSE":31,"SPECIAL_ATTACK":31,"SPECIAL_DEFENSE":31,"SPEED":31},
+       "evs":{"HP":0,"ATTACK":0,"DEFENSE":0,"SPECIAL_ATTACK":0,"SPECIAL_DEFENSE":0,"SPEED":0}}'
+```
+
+### Known limitations
+Following a Pokémon's evolution chain bypasses the library's cache: the evolution
+chain is referenced as an unnamed `ApiResource` (URL only) and cannot be routed
+through `PokeApiClient`/`CacheFacade`. As a result, each `evolve` call re-fetches the
+evolution chain uncached — a known, deliberate limitation.
+
+---
+
 ### Features
 * Simple, single [entry point](../master/src/main/java/skaro/pokeapi/client/PokeApiClient.java) for all client operations.
 * Non-blocking HTTP operations and non-blocking caching.

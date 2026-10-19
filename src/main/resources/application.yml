@@ -1,0 +1,10 @@
+skaro:
+  pokeapi:
+    base-uri: https://pokeapi.co/api/v2/
+    max-buffer-size: 565000
+
+trainer:
+  party:
+    max-size: 6
+  box:
+    max-size: 30
